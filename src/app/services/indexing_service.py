@@ -16,6 +16,6 @@ def index_pdf_file(file_path: Path) -> int:
     Returns:
         Number of document chunks indexed.
     """
-    loader = PyPDFLoader(str(file_path))
-    docs = loader.load()
-    return index_documents(docs)
+    # loader = PyPDFLoader(str(file_path))
+    # docs = loader.load()
+    return index_documents(file_path)
