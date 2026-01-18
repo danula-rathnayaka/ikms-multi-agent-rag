@@ -11,8 +11,10 @@ class QAState(TypedDict):
     2. Summarization Agent: generates `draft_answer` from `question` + `context`
     3. Verification Agent: produces final `answer` from `question` + `context` + `draft_answer`
     """
-
+    session_id: str | None
     question: str
     context: str | None
     draft_answer: str | None
     answer: str | None
+    history: list[dict] | None
+    conversation_summary: str | None
