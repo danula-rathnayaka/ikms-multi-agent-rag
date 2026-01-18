@@ -1,3 +1,5 @@
+from typing import Optional, List
+
 from pydantic import BaseModel
 
 
@@ -21,3 +23,19 @@ class QAResponse(BaseModel):
 
     answer: str
     context: str
+
+
+class ConversationalQARequest(BaseModel):
+    question: str
+    session_id: Optional[str] = None
+
+
+class ConversationalQAResponse(BaseModel):
+    answer: str
+    session_id: str
+    history: List[dict]
+
+
+class ConversationHistory(BaseModel):
+    session_id: str
+    history: List[dict]

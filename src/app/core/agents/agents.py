@@ -9,7 +9,6 @@ from typing import List
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ..llm.factory import create_chat_model
 from .prompts import (
     RETRIEVAL_SYSTEM_PROMPT,
     SUMMARIZATION_SYSTEM_PROMPT,
@@ -17,6 +16,7 @@ from .prompts import (
 )
 from .state import QAState
 from .tools import retrieval_tool
+from ..llm.factory import create_chat_model
 
 
 def _extract_last_ai_content(messages: List[object]) -> str:
@@ -25,6 +25,19 @@ def _extract_last_ai_content(messages: List[object]) -> str:
         if isinstance(msg, AIMessage):
             return str(msg.content)
     return ""
+
+
+def _format_history(history: List[dict] | None) -> str:
+    """Format conversation history into a readable string for the LLM."""
+    if not history:
+        return "No previous conversation history."
+
+    formatted_turns = []
+    for entry in history:
+        turn_str = f"User: {entry.get('question', '')}\nAssistant: {entry.get('answer', '')}"
+        formatted_turns.append(turn_str)
+
+    return "\n\n".join(formatted_turns)
 
 
 # Define agents at module level for reuse
@@ -51,14 +64,20 @@ def retrieval_node(state: QAState) -> QAState:
     """Retrieval Agent node: gathers context from vector store.
 
     This node:
-    - Sends the user's question to the Retrieval Agent.
+    - Formats history for context-aware retrieval.
+    - Sends the user's question + history to the Retrieval Agent.
     - The agent uses the attached retrieval tool to fetch document chunks.
-    - Extracts the tool's content (CONTEXT string) from the ToolMessage.
     - Stores the consolidated context string in `state["context"]`.
     """
     question = state["question"]
+    history_str = _format_history(state.get("history"))
 
-    result = retrieval_agent.invoke({"messages": [HumanMessage(content=question)]})
+    # We must pass 'question' and 'history' to fill the prompt variables
+    result = retrieval_agent.invoke({
+        "messages": [HumanMessage(content=question)],
+        "question": question,
+        "history": history_str
+    })
 
     messages = result.get("messages", [])
     context = ""
@@ -78,18 +97,24 @@ def summarization_node(state: QAState) -> QAState:
     """Summarization Agent node: generates draft answer from context.
 
     This node:
-    - Sends question + context to the Summarization Agent.
-    - Agent responds with a draft answer grounded only in the context.
+    - Sends question + context + history to the Summarization Agent.
+    - Agent responds with a draft answer grounded in context and previous turns.
     - Stores the draft answer in `state["draft_answer"]`.
     """
     question = state["question"]
     context = state.get("context")
+    history_str = _format_history(state.get("history"))
 
     user_content = f"Question: {question}\n\nContext:\n{context}"
 
-    result = summarization_agent.invoke(
-        {"messages": [HumanMessage(content=user_content)]}
-    )
+    # We must pass 'history', 'question', and 'context' to fill the prompt variables
+    result = summarization_agent.invoke({
+        "messages": [HumanMessage(content=user_content)],
+        "question": question,
+        "context": context,
+        "history": history_str
+    })
+
     messages = result.get("messages", [])
     draft_answer = _extract_last_ai_content(messages)
 

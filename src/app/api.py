@@ -1,12 +1,12 @@
 from pathlib import Path
+from typing import Dict, List
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 
-from .models import QuestionRequest, QAResponse
-from .services.qa_service import answer_question
+from .core.agents.graph import run_conversational_qa_flow
+from .models import ConversationalQAResponse, ConversationalQARequest, ConversationHistory
 from .services.indexing_service import index_pdf_file
-
 
 app = FastAPI(
     title="Class 12 Multi-Agent RAG Demo",
@@ -15,13 +15,15 @@ app = FastAPI(
         "The `/qa` endpoint currently returns placeholder responses and "
         "will be wired to a multi-agent RAG pipeline in later user stories."
     ),
-    version="0.1.0",
+    version="0.2.0",
 )
+
+SESSIONS: Dict[str, List[dict]] = {}
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(
-    request: Request, exc: Exception
+        request: Request, exc: Exception
 ) -> JSONResponse:  # pragma: no cover - simple demo handler
     """Catch-all handler for unexpected errors.
 
@@ -40,32 +42,53 @@ async def unhandled_exception_handler(
     )
 
 
-@app.post("/qa", response_model=QAResponse, status_code=status.HTTP_200_OK)
-async def qa_endpoint(payload: QuestionRequest) -> QAResponse:
-    """Submit a question about the vector databases paper.
-
-    US-001 requirements:
-    - Accept POST requests at `/qa` with JSON body containing a `question` field
-    - Validate the request format and return 400 for invalid requests
-    - Return 200 with `answer`, `draft_answer`, and `context` fields
-    - Delegate to the multi-agent RAG service layer for processing
-    """
-
+@app.post("/qa/conversation", response_model=ConversationalQAResponse)
+async def conversational_qa(payload: ConversationalQARequest) -> ConversationalQAResponse:
     question = payload.question.strip()
-    if not question:
-        # Explicit validation beyond Pydantic's type checking to ensure
-        # non-empty questions.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="`question` must be a non-empty string.",
-        )
+    session_id = payload.session_id
 
-    # Delegate to the service layer which runs the multi-agent QA graph
-    result = answer_question(question)
+    history = []
+    if session_id:
+        if session_id in SESSIONS:
+            history = SESSIONS[session_id]
+        else:
+            history = []
 
-    return QAResponse(
-        answer=result.get("answer", ""),
-        context=result.get("context", ""),
+    final_state = run_conversational_qa_flow(
+        question=question,
+        history=history,
+        session_id=session_id
+    )
+
+    new_answer = final_state.get("answer", "")
+    current_session_id = final_state.get("session_id")
+
+    new_turn = {
+        "question": question,
+        "answer": new_answer,
+        "context_used": final_state.get("context", "")
+    }
+
+    if current_session_id not in SESSIONS:
+        SESSIONS[current_session_id] = []
+
+    SESSIONS[current_session_id].append(new_turn)
+
+    return ConversationalQAResponse(
+        answer=new_answer,
+        session_id=current_session_id,
+        history=SESSIONS[current_session_id]
+    )
+
+
+@app.get("/qa/session/{session_id}/history", response_model=ConversationHistory)
+async def get_conversation_history(session_id: str) -> ConversationHistory:
+    if session_id not in SESSIONS:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return ConversationHistory(
+        session_id=session_id,
+        history=SESSIONS[session_id]
     )
 
 
