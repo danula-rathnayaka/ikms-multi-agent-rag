@@ -22,13 +22,8 @@ def serialize_chunks(docs: List[Document]) -> str:
     context_parts = []
 
     for idx, doc in enumerate(docs, start=1):
-        # Extract page number from metadata
-        page_num = doc.metadata.get("page") or doc.metadata.get(
-            "page_number", "unknown"
-        )
-
         # Format chunk with index and page number
-        chunk_header = f"Chunk {idx} (page={page_num}):"
+        chunk_header = f"Chunk {idx}"
         chunk_content = doc.page_content.strip()
 
         context_parts.append(f"{chunk_header}\n{chunk_content}")

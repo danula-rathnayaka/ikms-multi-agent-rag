@@ -5,6 +5,7 @@ from typing import Dict, List
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 
+from .core.agents.agents import generate_chat_title
 from .core.agents.graph import run_conversational_qa_flow
 from .models import ConversationalQAResponse, ConversationalQARequest, ConversationHistory
 from .services.indexing_service import index_pdf_file
@@ -48,44 +49,51 @@ async def conversational_qa(payload: ConversationalQARequest) -> ConversationalQ
     question = payload.question.strip()
     session_id = payload.session_id
 
-    history = []
-    if session_id:
-        if session_id in SESSIONS:
-            history = SESSIONS[session_id]
-        else:
-            history = []
+    history_list = []
+    if session_id and session_id in SESSIONS:
+        history_list = SESSIONS[session_id]["history"]
 
     final_state = run_conversational_qa_flow(
         question=question,
-        history=history,
+        history=history_list,
         session_id=session_id
     )
 
     new_answer = final_state.get("answer", "")
     current_session_id = final_state.get("session_id")
-    timestamp = datetime.datetime.now().isoformat()
-    turn_number = len(history) + 1
+    used_history = final_state.get("used_history", False)
+
+    if current_session_id not in SESSIONS:
+        SESSIONS[current_session_id] = {
+            "title": "New Chat",
+            "history": []
+        }
+
+    if len(SESSIONS[current_session_id]["history"]) == 0:
+        try:
+            new_title = generate_chat_title(question, new_answer)
+            SESSIONS[current_session_id]["title"] = new_title
+        except Exception as e:
+            print(f"Title generation failed: {e}")
+            SESSIONS[current_session_id]["title"] = "New Conversation"
 
     new_turn = {
-        "turn": turn_number,
+        "turn": len(SESSIONS[current_session_id]["history"]) + 1,
         "question": question,
         "answer": new_answer,
         "context_used": final_state.get("context", ""),
-        "timestamp": timestamp
+        "used_history": used_history,
+        "timestamp": datetime.datetime.now().isoformat()
     }
 
-    if current_session_id not in SESSIONS:
-        SESSIONS[current_session_id] = []
-
-    SESSIONS[current_session_id].append(new_turn)
-
-    summary = final_state.get("conversation_summary")
+    SESSIONS[current_session_id]["history"].append(new_turn)
 
     return ConversationalQAResponse(
         answer=new_answer,
         session_id=current_session_id,
-        history=SESSIONS[current_session_id],
-        conversation_summary=summary
+        session_title=SESSIONS[current_session_id]["title"],
+        history=SESSIONS[current_session_id]["history"],
+        conversation_summary=final_state.get("conversation_summary")
     )
 
 

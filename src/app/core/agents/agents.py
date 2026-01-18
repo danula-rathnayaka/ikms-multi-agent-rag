@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from .prompts import (
     RETRIEVAL_SYSTEM_PROMPT,
     SUMMARIZATION_SYSTEM_PROMPT,
-    VERIFICATION_SYSTEM_PROMPT, MEMORY_SUMMARIZATION_SYSTEM_PROMPT,
+    VERIFICATION_SYSTEM_PROMPT, MEMORY_SUMMARIZATION_SYSTEM_PROMPT, TITLE_GENERATION_PROMPT,
 )
 from .state import QAState
 from .tools import retrieval_tool
@@ -65,6 +65,12 @@ memory_summarization_agent = create_agent(
     system_prompt=MEMORY_SUMMARIZATION_SYSTEM_PROMPT,
 )
 
+title_agent = create_agent(
+    model=create_chat_model(),
+    tools=[],
+    system_prompt=TITLE_GENERATION_PROMPT,
+)
+
 
 def retrieval_node(state: QAState) -> QAState:
     """Retrieval Agent node: gathers context from vector store.
@@ -113,7 +119,6 @@ def summarization_node(state: QAState) -> QAState:
 
     user_content = f"Question: {question}\n\nContext:\n{context}"
 
-    # We must pass 'history', 'question', and 'context' to fill the prompt variables
     result = summarization_agent.invoke({
         "messages": [HumanMessage(content=user_content)],
         "question": question,
@@ -122,10 +127,18 @@ def summarization_node(state: QAState) -> QAState:
     })
 
     messages = result.get("messages", [])
-    draft_answer = _extract_last_ai_content(messages)
+    raw_answer = _extract_last_ai_content(messages)
+
+    used_history = False
+    if "[HISTORY_USED]" in raw_answer:
+        used_history = True
+        draft_answer = raw_answer.replace("[HISTORY_USED]", "").strip()
+    else:
+        draft_answer = raw_answer
 
     return {
         "draft_answer": draft_answer,
+        "used_history": used_history
     }
 
 
@@ -180,3 +193,15 @@ def memory_summarizer_node(state: QAState) -> QAState:
         }
 
     return {}
+
+
+def generate_chat_title(question: str, answer: str) -> str:
+    result = title_agent.invoke({
+        "messages": [HumanMessage(content="Generate a title")],
+        "question": question,
+        "answer": answer
+    })
+
+    messages = result.get("messages", [])
+    title = _extract_last_ai_content(messages).strip('"')
+    return title

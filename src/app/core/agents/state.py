@@ -18,3 +18,4 @@ class QAState(TypedDict):
     answer: str | None
     history: list[dict] | None
     conversation_summary: str | None
+    used_history: bool

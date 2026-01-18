@@ -33,6 +33,7 @@ class ConversationalQARequest(BaseModel):
 class ConversationalQAResponse(BaseModel):
     answer: str
     session_id: str
+    session_title: Optional[str] = None
     history: List[dict]
     conversation_summary: Optional[str] = None
 
