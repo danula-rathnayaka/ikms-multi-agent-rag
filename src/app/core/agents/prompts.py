@@ -45,3 +45,13 @@ Instructions:
 - Ensure the final answer is accurate and grounded in the source material.
 - Return ONLY the final, corrected answer text (no explanations or meta-commentary).
 """
+
+MEMORY_SUMMARIZATION_SYSTEM_PROMPT = """You are a Memory Agent. Your job is to
+compress a long conversation history into a concise summary.
+
+Instructions:
+- Read the provided conversation history.
+- Create a summary that captures the key topics, user intent, and specific details discussed.
+- Focus on retaining technical details (like method names, comparisons, advantages) that might be referenced later.
+- The summary will be used to provide context for future turns.
+"""

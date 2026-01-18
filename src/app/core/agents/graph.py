@@ -6,7 +6,7 @@ from typing import Any, Dict
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 
-from .agents import retrieval_node, summarization_node, verification_node
+from .agents import retrieval_node, summarization_node, verification_node, memory_summarizer_node
 from .state import QAState
 from ..utils import generate_session_id
 
@@ -28,11 +28,13 @@ def create_qa_graph() -> Any:
     builder.add_node("retrieval", retrieval_node)
     builder.add_node("summarization", summarization_node)
     builder.add_node("verification", verification_node)
+    builder.add_node("memory_summarizer", memory_summarizer_node)
 
     builder.add_edge(START, "retrieval")
     builder.add_edge("retrieval", "summarization")
     builder.add_edge("summarization", "verification")
-    builder.add_edge("verification", END)
+    builder.add_edge("verification", "memory_summarizer")
+    builder.add_edge("memory_summarizer", END)
 
     return builder.compile()
 

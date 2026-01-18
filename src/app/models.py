@@ -34,6 +34,7 @@ class ConversationalQAResponse(BaseModel):
     answer: str
     session_id: str
     history: List[dict]
+    conversation_summary: Optional[str] = None
 
 
 class ConversationHistory(BaseModel):

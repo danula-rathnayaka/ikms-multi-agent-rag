@@ -1,3 +1,4 @@
+import datetime
 from pathlib import Path
 from typing import Dict, List
 
@@ -62,11 +63,15 @@ async def conversational_qa(payload: ConversationalQARequest) -> ConversationalQ
 
     new_answer = final_state.get("answer", "")
     current_session_id = final_state.get("session_id")
+    timestamp = datetime.datetime.now().isoformat()
+    turn_number = len(history) + 1
 
     new_turn = {
+        "turn": turn_number,
         "question": question,
         "answer": new_answer,
-        "context_used": final_state.get("context", "")
+        "context_used": final_state.get("context", ""),
+        "timestamp": timestamp
     }
 
     if current_session_id not in SESSIONS:
@@ -74,10 +79,13 @@ async def conversational_qa(payload: ConversationalQARequest) -> ConversationalQ
 
     SESSIONS[current_session_id].append(new_turn)
 
+    summary = final_state.get("conversation_summary")
+
     return ConversationalQAResponse(
         answer=new_answer,
         session_id=current_session_id,
-        history=SESSIONS[current_session_id]
+        history=SESSIONS[current_session_id],
+        conversation_summary=summary
     )
 
 

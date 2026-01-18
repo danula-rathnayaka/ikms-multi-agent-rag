@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from .prompts import (
     RETRIEVAL_SYSTEM_PROMPT,
     SUMMARIZATION_SYSTEM_PROMPT,
-    VERIFICATION_SYSTEM_PROMPT,
+    VERIFICATION_SYSTEM_PROMPT, MEMORY_SUMMARIZATION_SYSTEM_PROMPT,
 )
 from .state import QAState
 from .tools import retrieval_tool
@@ -57,6 +57,12 @@ verification_agent = create_agent(
     model=create_chat_model(),
     tools=[],
     system_prompt=VERIFICATION_SYSTEM_PROMPT,
+)
+
+memory_summarization_agent = create_agent(
+    model=create_chat_model(),
+    tools=[],
+    system_prompt=MEMORY_SUMMARIZATION_SYSTEM_PROMPT,
 )
 
 
@@ -154,3 +160,23 @@ Please verify and correct the draft answer, removing any unsupported claims."""
     return {
         "answer": answer,
     }
+
+
+def memory_summarizer_node(state: QAState) -> QAState:
+    history = state.get("history", []) or []
+
+    if len(history) > 1:
+        history_str = _format_history(history)
+        user_content = f"Summarize this conversation history:\n\n{history_str}"
+
+        result = memory_summarization_agent.invoke(
+            {"messages": [HumanMessage(content=user_content)]}
+        )
+        messages = result.get("messages", [])
+        summary = _extract_last_ai_content(messages)
+
+        return {
+            "conversation_summary": summary
+        }
+
+    return {}
