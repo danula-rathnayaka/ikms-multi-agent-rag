@@ -1,18 +1,18 @@
-"""Agent implementations for the multi-agent RAG flow.
-
-This module defines three LangChain agents (Retrieval, Summarization,
-Verification) and thin node functions that LangGraph uses to invoke them.
-"""
+"""Agent implementations for the multi-agent RAG flow."""
 
 from typing import List
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.prompts import ChatPromptTemplate  # <--- NEW IMPORT
+from pydantic import BaseModel, Field  # <--- NEW IMPORTS
 
 from .prompts import (
     RETRIEVAL_SYSTEM_PROMPT,
     SUMMARIZATION_SYSTEM_PROMPT,
-    VERIFICATION_SYSTEM_PROMPT, MEMORY_SUMMARIZATION_SYSTEM_PROMPT, TITLE_GENERATION_PROMPT,
+    VERIFICATION_SYSTEM_PROMPT,
+    MEMORY_SUMMARIZATION_SYSTEM_PROMPT,
+    TITLE_GENERATION_PROMPT,
 )
 from .state import QAState
 from .tools import retrieval_tool
@@ -40,17 +40,26 @@ def _format_history(history: List[dict] | None) -> str:
     return "\n\n".join(formatted_turns)
 
 
+class SummarizationOutput(BaseModel):
+    answer: str = Field(
+        ...,
+        description="The natural language answer to the user's question based on the context."
+    )
+    used_history: bool = Field(
+        ...,
+        description=(
+            "CRITICAL: Set to True if the current question contains pronouns (e.g., 'he', 'she', 'it', 'that', 'they') "
+            "or implicit references that refer back to the Conversation History. "
+            "Set to False ONLY if the question is completely self-contained (e.g., 'What is HNSW?')."
+        )
+    )
+
+
 # Define agents at module level for reuse
 retrieval_agent = create_agent(
     model=create_chat_model(),
     tools=[retrieval_tool],
     system_prompt=RETRIEVAL_SYSTEM_PROMPT,
-)
-
-summarization_agent = create_agent(
-    model=create_chat_model(),
-    tools=[],
-    system_prompt=SUMMARIZATION_SYSTEM_PROMPT,
 )
 
 verification_agent = create_agent(
@@ -70,6 +79,13 @@ title_agent = create_agent(
     tools=[],
     system_prompt=TITLE_GENERATION_PROMPT,
 )
+
+summarization_llm = create_chat_model()
+summarization_prompt = ChatPromptTemplate.from_messages([
+    ("system", SUMMARIZATION_SYSTEM_PROMPT),
+    ("human", "Question: {question}\n\nContext:\n{context}")
+])
+summarization_chain = summarization_prompt | summarization_llm.with_structured_output(SummarizationOutput)
 
 
 def retrieval_node(state: QAState) -> QAState:
@@ -115,29 +131,22 @@ def summarization_node(state: QAState) -> QAState:
     """
     question = state["question"]
     context = state.get("context")
-    history_str = _format_history(state.get("history"))
+    history_list = state.get("history", []) or []
+    history_str = _format_history(history_list)
 
-    user_content = f"Question: {question}\n\nContext:\n{context}"
-
-    result = summarization_agent.invoke({
-        "messages": [HumanMessage(content=user_content)],
+    result: SummarizationOutput = summarization_chain.invoke({
+        "history": history_str,
         "question": question,
-        "context": context,
-        "history": history_str
+        "context": context
     })
 
-    messages = result.get("messages", [])
-    raw_answer = _extract_last_ai_content(messages)
+    used_history = result.used_history
 
-    used_history = False
-    if "[HISTORY_USED]" in raw_answer:
-        used_history = True
-        draft_answer = raw_answer.replace("[HISTORY_USED]", "").strip()
-    else:
-        draft_answer = raw_answer
+    if not history_list:
+        used_history = False
 
     return {
-        "draft_answer": draft_answer,
+        "draft_answer": result.answer,
         "used_history": used_history
     }
 
@@ -196,12 +205,16 @@ def memory_summarizer_node(state: QAState) -> QAState:
 
 
 def generate_chat_title(question: str, answer: str) -> str:
+    prompt_content = f"Generate a title for this:\nQuestion: {question}\nAnswer: {answer}"
+
     result = title_agent.invoke({
-        "messages": [HumanMessage(content="Generate a title")],
-        "question": question,
-        "answer": answer
+        "messages": [HumanMessage(content=prompt_content)]
     })
 
     messages = result.get("messages", [])
     title = _extract_last_ai_content(messages).strip('"')
+
+    if not title or len(title) > 50:
+        return "New Chat"
+
     return title

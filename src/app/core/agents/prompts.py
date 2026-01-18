@@ -31,9 +31,6 @@ Tasks:
 2. Provide answers that build on previous turns.
 3. Reference previous answers when relevant.
 4. Avoid repeating information already provided unless specifically asked.
-
-CRITICAL INSTRUCTION:
-If you used information from the "Conversation History" to answer this question (e.g., to resolve a reference or get context), you MUST append the tag [HISTORY_USED] at the very end of your response.
 """
 
 VERIFICATION_SYSTEM_PROMPT = """You are a Verification Agent. Your job is to
@@ -58,9 +55,10 @@ Instructions:
 """
 
 TITLE_GENERATION_PROMPT = """You are a Title Generator.
-Given a user question and the assistant's answer, create a short, relevant related title (3-5 words max) for this chat session.
-Do not use quotes. Just the title.
+Your task is to create a short, concise title (maximum 5 words) for the chat session based on the provided user question and assistant answer.
 
-Question: {question}
-Answer: {answer}
+Rules:
+1. The title must be specific to the topic.
+2. Do NOT use quotes.
+3. Do NOT return instructions. Just the title text.
 """
