@@ -1,4 +1,5 @@
 import datetime
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -7,8 +8,8 @@ from fastapi.responses import JSONResponse
 
 from .core.agents.agents import generate_chat_title
 from .core.agents.graph import run_conversational_qa_flow
+from .core.retrieval.vector_store import index_documents, delete_document_vectors
 from .models import ConversationalQAResponse, ConversationalQARequest, ConversationHistory
-from .services.indexing_service import index_pdf_file
 
 app = FastAPI(
     title="Class 12 Multi-Agent RAG Demo",
@@ -21,6 +22,8 @@ app = FastAPI(
 )
 
 SESSIONS: Dict[str, List[dict]] = {}
+UPLOAD_DIR = Path("data/uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @app.exception_handler(Exception)
@@ -125,18 +128,41 @@ async def index_pdf(file: UploadFile = File(...)) -> dict:
             detail="Only PDF files are supported.",
         )
 
-    upload_dir = Path("data/uploads")
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    file_path = upload_dir / file.filename
+    file_path = UPLOAD_DIR / file.filename
     contents = await file.read()
     file_path.write_bytes(contents)
 
-    # Index the saved PDF
-    chunks_indexed = index_pdf_file(file_path)
+    chunks_indexed = index_documents(file_path)
 
     return {
         "filename": file.filename,
         "chunks_indexed": chunks_indexed,
         "message": "PDF indexed successfully.",
     }
+
+
+@app.get("/documents", status_code=status.HTTP_200_OK)
+async def list_documents() -> dict:
+    files = []
+    if UPLOAD_DIR.exists():
+        files = [f.name for f in UPLOAD_DIR.glob("*.pdf")]
+    return {"documents": files}
+
+
+@app.delete("/documents/{filename}", status_code=status.HTTP_200_OK)
+async def delete_document(filename: str) -> dict:
+    file_path = UPLOAD_DIR / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    success = delete_document_vectors(file_path)
+    if not success:
+        print(f"Warning: Failed to delete vectors for {filename}")
+
+    try:
+        os.remove(file_path)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {e}")
+
+    return {"message": f"Document {filename} deleted successfully."}
