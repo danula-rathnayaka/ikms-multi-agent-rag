@@ -32,6 +32,7 @@ def _get_vector_store() -> PineconeVectorStore:
         embedding=embeddings,
     )
 
+
 def get_retriever(k: int | None = None):
     """Get a Pinecone retriever instance.
 
@@ -61,6 +62,7 @@ def retrieve(query: str, k: int | None = None) -> List[Document]:
     """
     retriever = get_retriever(k=k)
     return retriever.invoke(query)
+
 
 def index_documents(file_path: Path) -> int:
     """Index a list of Document objects into the Pinecone vector store.
@@ -93,4 +95,20 @@ def delete_document_vectors(file_path: Path) -> bool:
         return True
     except Exception as e:
         print(f"Error deleting vectors for {file_path}: {e}")
+        return False
+
+
+def delete_all_vectors() -> bool:
+    """Wipe the entire Pinecone index. Used on server startup."""
+    try:
+        settings = get_settings()
+        pc = Pinecone(api_key=settings.pinecone_api_key)
+        index = pc.Index(settings.pinecone_index_name)
+
+        # This deletes every single vector in the namespace
+        index.delete(delete_all=True)
+        print("Pinecone Index Wiped Successfully.")
+        return True
+    except Exception as e:
+        print(f"Error wiping Pinecone index: {e}")
         return False

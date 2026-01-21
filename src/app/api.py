@@ -1,5 +1,7 @@
 import datetime
 import os
+import shutil
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List
 
@@ -8,8 +10,28 @@ from fastapi.responses import JSONResponse
 
 from .core.agents.agents import generate_chat_title
 from .core.agents.graph import run_conversational_qa_flow
-from .core.retrieval.vector_store import index_documents, delete_document_vectors
+from .core.retrieval.vector_store import index_documents, delete_document_vectors, delete_all_vectors
 from .models import ConversationalQAResponse, ConversationalQARequest, ConversationHistory
+
+UPLOAD_DIR = Path("/tmp/uploads")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Server Starting... Cleaning up...")
+
+    delete_all_vectors()
+
+    if UPLOAD_DIR.exists():
+        shutil.rmtree(UPLOAD_DIR)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    print("System Ready: Clean Slate.")
+
+    yield
+
+    print("Server Shutting Down...")
+
 
 app = FastAPI(
     title="Class 12 Multi-Agent RAG Demo",
@@ -19,11 +41,15 @@ app = FastAPI(
         "will be wired to a multi-agent RAG pipeline in later user stories."
     ),
     version="0.2.0",
+    lifespan=lifespan
 )
 
 SESSIONS: Dict[str, List[dict]] = {}
-UPLOAD_DIR = Path("data/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
 
 
 @app.exception_handler(Exception)
@@ -121,16 +147,18 @@ async def index_pdf(file: UploadFile = File(...)) -> dict:
     - Uses PyPDFLoader to load the document into LangChain `Document` objects
     - Indexes those documents into the configured Pinecone vector store
     """
-
-    if file.content_type not in ("application/pdf",):
+    if file.content_type != "application/pdf":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF files are supported.",
         )
 
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
     file_path = UPLOAD_DIR / file.filename
-    contents = await file.read()
-    file_path.write_bytes(contents)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
     chunks_indexed = index_documents(file_path)
 
@@ -153,16 +181,15 @@ async def list_documents() -> dict:
 async def delete_document(filename: str) -> dict:
     file_path = UPLOAD_DIR / filename
 
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-
     success = delete_document_vectors(file_path)
-    if not success:
-        print(f"Warning: Failed to delete vectors for {filename}")
 
-    try:
-        os.remove(file_path)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete file: {e}")
+    if file_path.exists():
+        try:
+            os.remove(file_path)
+        except OSError as e:
+            print(f"Error deleting local file: {e}")
 
-    return {"message": f"Document {filename} deleted successfully."}
+    if not success and not file_path.exists():
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    return {"message": f"Document {filename} deleted."}

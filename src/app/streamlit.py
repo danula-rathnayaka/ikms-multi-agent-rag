@@ -12,7 +12,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS STYLES ---
 st.markdown("""
 <style>
     .history-badge {
@@ -138,6 +137,8 @@ if "active_session_id" not in st.session_state:
 if "documents" not in st.session_state:
     st.session_state.documents = []
 
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
 
 def fetch_documents():
     try:
@@ -205,7 +206,13 @@ with st.sidebar:
     st.subheader("Knowledge Base")
 
     with st.expander("Upload Documents", expanded=False):
-        uploaded_file = st.file_uploader("Upload PDF", type="pdf", label_visibility="collapsed")
+        uploaded_file = st.file_uploader(
+            "Upload PDF",
+            type="pdf",
+            label_visibility="collapsed",
+            key=f"uploader_{st.session_state.uploader_key}"
+        )
+
         if uploaded_file is not None:
             if st.button("Index Document", use_container_width=True):
                 with st.status("Processing...", expanded=True) as status:
@@ -216,6 +223,9 @@ with st.sidebar:
                         if response.status_code == 200:
                             status.update(label="Indexed!", state="complete", expanded=False)
                             st.toast(f"Indexed {uploaded_file.name}", icon="✅")
+
+                            st.session_state.uploader_key += 1
+
                             fetch_documents()
                             st.rerun()
                         else:
