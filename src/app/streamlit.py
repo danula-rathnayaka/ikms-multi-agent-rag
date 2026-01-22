@@ -182,8 +182,10 @@ def delete_document_api(filename):
     try:
         response = requests.delete(f"{API_URL}/documents/{filename}")
         if response.status_code == 200:
+            if filename in st.session_state.documents:
+                st.session_state.documents.remove(filename)
+
             st.toast(f"Deleted {filename}", icon="🗑️")
-            fetch_documents()
             st.rerun()
         else:
             st.error("Failed to delete document.")
@@ -238,10 +240,15 @@ def delete_chat_session_api(session_id):
     try:
         response = requests.delete(f"{API_URL}/sessions/{session_id}")
         if response.status_code == 200:
-            st.toast("Conversation deleted", icon="🗑️")
+            st.session_state.pending_delete_id = None
+
+            if session_id in st.session_state.chat_sessions:
+                del st.session_state.chat_sessions[session_id]
+
             if st.session_state.active_session_id == session_id:
                 st.session_state.active_session_id = None
-            fetch_chat_sessions()
+
+            st.toast("Conversation deleted", icon="🗑️")
             st.rerun()
         else:
             st.error("Failed to delete conversation.")
@@ -290,7 +297,6 @@ def confirm_delete_dialog(filename):
     with col2:
         if st.button("Yes, Delete", type="primary", use_container_width=True):
             delete_document_api(filename)
-            st.rerun()
 
 
 @st.dialog("Delete Conversation")
@@ -311,8 +317,6 @@ def confirm_delete_chat_dialog():
     with col2:
         if st.button("Yes, Delete", type="primary", use_container_width=True, key="confirm_chat_del"):
             delete_chat_session_api(session_id)
-            st.session_state.pending_delete_id = None
-            st.rerun()
 
 
 handle_query_params()
@@ -369,8 +373,9 @@ with st.sidebar:
                     st.markdown(f"<span title='{doc}' style='font-size: 0.9em;'>{short_name}</span>",
                                 unsafe_allow_html=True)
                 with col2:
-                    if st.button("✕", key=f"del_{doc}", help=f"Delete {doc}", type="tertiary"):
-                        confirm_delete_dialog(doc)
+                    if st.session_state.pending_delete_id is None:
+                        if st.button("✕", key=f"del_{doc}", help=f"Delete {doc}", type="tertiary"):
+                            confirm_delete_dialog(doc)
     else:
         st.caption("No documents found.")
 
