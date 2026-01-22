@@ -3,7 +3,7 @@ import os
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Any
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
@@ -44,7 +44,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-SESSIONS: Dict[str, List[dict]] = {}
+SESSIONS: Dict[str, Dict[str, Any]] = {}
 
 
 @app.get("/health")
@@ -73,6 +73,47 @@ async def unhandled_exception_handler(
     )
 
 
+@app.get("/sessions", status_code=status.HTTP_200_OK)
+async def list_sessions() -> dict:
+    session_list = []
+    for session_id, data in SESSIONS.items():
+        last_updated = data.get("last_updated")
+        if not last_updated and data.get("history"):
+            last_updated = data["history"][-1].get("timestamp")
+
+        session_list.append({
+            "id": session_id,
+            "title": data.get("title", "Untitled Session"),
+            "last_updated": last_updated or datetime.datetime.min.isoformat()
+        })
+
+    session_list.sort(key=lambda x: x["last_updated"], reverse=True)
+    return {"sessions": session_list}
+
+
+@app.get("/sessions/{session_id}", status_code=status.HTTP_200_OK)
+async def get_session(session_id: str) -> dict:
+    if session_id not in SESSIONS:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session_data = SESSIONS[session_id]
+    return {
+        "id": session_id,
+        "title": session_data.get("title"),
+        "history": session_data.get("history", []),
+        "conversation_summary": session_data.get("conversation_summary"),
+        "last_updated": session_data.get("last_updated")
+    }
+
+
+@app.delete("/sessions/{session_id}", status_code=status.HTTP_200_OK)
+async def delete_session(session_id: str) -> dict:
+    if session_id in SESSIONS:
+        del SESSIONS[session_id]
+        return {"message": "Session deleted successfully"}
+    raise HTTPException(status_code=404, detail="Session not found")
+
+
 @app.post("/qa/conversation", response_model=ConversationalQAResponse)
 async def conversational_qa(payload: ConversationalQARequest) -> ConversationalQAResponse:
     question = payload.question.strip()
@@ -91,11 +132,14 @@ async def conversational_qa(payload: ConversationalQARequest) -> ConversationalQ
     new_answer = final_state.get("answer", "")
     current_session_id = final_state.get("session_id")
     used_history = final_state.get("used_history", False)
+    timestamp = datetime.datetime.now().isoformat()
 
     if current_session_id not in SESSIONS:
         SESSIONS[current_session_id] = {
             "title": "New Chat",
-            "history": []
+            "history": [],
+            "conversation_summary": None,
+            "last_updated": timestamp
         }
 
     if len(SESSIONS[current_session_id]["history"]) == 0:
@@ -112,10 +156,14 @@ async def conversational_qa(payload: ConversationalQARequest) -> ConversationalQ
         "answer": new_answer,
         "context_used": final_state.get("context", ""),
         "used_history": used_history,
-        "timestamp": datetime.datetime.now().isoformat()
+        "timestamp": timestamp
     }
 
     SESSIONS[current_session_id]["history"].append(new_turn)
+    SESSIONS[current_session_id]["last_updated"] = timestamp
+
+    if final_state.get("conversation_summary"):
+        SESSIONS[current_session_id]["conversation_summary"] = final_state.get("conversation_summary")
 
     return ConversationalQAResponse(
         answer=new_answer,
@@ -133,7 +181,7 @@ async def get_conversation_history(session_id: str) -> ConversationHistory:
 
     return ConversationHistory(
         session_id=session_id,
-        history=SESSIONS[session_id]
+        history=SESSIONS[session_id]["history"]
     )
 
 

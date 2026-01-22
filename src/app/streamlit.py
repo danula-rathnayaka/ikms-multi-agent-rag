@@ -30,39 +30,73 @@ st.markdown("""
         width: fit-content;
     }
 
-    [data-testid="stSidebar"] .stButton button {
+    .session-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         width: 100%;
-        display: flex !important;
-        justify-content: flex-start !important; /* Align container left */
-        text-align: left !important;
-        padding-left: 15px !important;
+        padding: 8px 12px;
+        margin-bottom: 8px;
+        background-color: var(--secondary-background-color);
+        border: 1px solid transparent;
+        border-radius: 8px;
+        transition: all 0.2s ease;
+        text-decoration: none !important;
+        color: var(--text-color) !important;
     }
 
-    [data-testid="stSidebar"] .stButton button > div {
-        display: flex !important;
-        justify-content: flex-start !important;
-        width: 100% !important;
+    .session-card:hover {
+        border-color: #4A4E57;
     }
 
-    [data-testid="stSidebar"] .stButton button p {
-        text-align: left !important;
-        width: 100%;
+    .session-card.active {
+        background-color: #4A4E57;
+        border-color: #4A4E57;
+    }
+
+    .session-card.active .session-title {
+        color: white !important;
+    }
+
+    .session-title {
+        flex-grow: 1;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        display: block;
-    }
-
-    [data-testid="stSidebar"] button[kind="primary"] {
-        background-color: #4A4E57 !important;
-        border-color: #4A4E57 !important;
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--text-color);
+        text-decoration: none;
+        margin-right: 10px;
+        cursor: pointer;
         color: white !important;
-        font-weight: 600;
+        text-decoration: none !important;
     }
 
-    [data-testid="stSidebar"] button[kind="primary"]:hover {
-        background-color: #31333F !important;
-        border-color: #31333F !important;
+    .session-delete {
+        color: white !important;
+        font-size: 20px;
+        font-weight: bold;
+        text-decoration: none;
+        cursor: pointer;
+        padding: 0 4px;
+        line-height: 1;
+        border-radius: 4px;
+        text-decoration: none !important;
+
+        opacity: 0;
+        transition: opacity 0.2s ease, color 0.2s ease;
+    }
+
+    .session-card:hover .session-delete,
+    .session-card.active .session-delete {
+        opacity: 1;
+        color: white !important;
+    }
+
+    .session-card .session-delete:hover {
+        color: #ff4b4b !important;
+        background-color: transparent !important;
     }
 
     [data-testid="stPopover"]:last-of-type {
@@ -101,13 +135,6 @@ st.markdown("""
         box-shadow: 0px 4px 10px rgba(0,0,0,0.15) !important;
     }
 
-    [data-testid="stPopover"]:last-of-type button:active, 
-    [data-testid="stPopover"]:last-of-type button:focus {
-        border-color: #4A4E57 !important;
-        color: #4A4E57 !important;
-        background-color: #e6e8eb !important;
-    }
-
     @media (prefers-color-scheme: dark) {
         [data-testid="stPopover"]:last-of-type button {
             background-color: #262730 !important;
@@ -119,7 +146,7 @@ st.markdown("""
         [data-testid="stPopover"]:last-of-type button:hover {
             background-color: #31333F !important;
             border-color: #60646e !important;
-            color: white !important; /* Force text white on hover */
+            color: white !important;
         }
     }
 
@@ -136,9 +163,11 @@ if "active_session_id" not in st.session_state:
     st.session_state.active_session_id = None
 if "documents" not in st.session_state:
     st.session_state.documents = []
-
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
+if "pending_delete_id" not in st.session_state:
+    st.session_state.pending_delete_id = None
+
 
 def fetch_documents():
     try:
@@ -162,12 +191,66 @@ def delete_document_api(filename):
         st.error(f"Error: {e}")
 
 
+def fetch_chat_sessions():
+    try:
+        response = requests.get(f"{API_URL}/sessions")
+        if response.status_code == 200:
+            sessions_list = response.json().get("sessions", [])
+            current_ids = set()
+            for s in sessions_list:
+                s_id = s["id"]
+                current_ids.add(s_id)
+                if s_id not in st.session_state.chat_sessions:
+                    st.session_state.chat_sessions[s_id] = {
+                        "title": s["title"],
+                        "last_updated": s["last_updated"],
+                        "history": [],
+                        "summary": None
+                    }
+                else:
+                    st.session_state.chat_sessions[s_id]["title"] = s["title"]
+                    st.session_state.chat_sessions[s_id]["last_updated"] = s["last_updated"]
+
+            keys_to_remove = [k for k in st.session_state.chat_sessions if k not in current_ids]
+            for k in keys_to_remove:
+                del st.session_state.chat_sessions[k]
+                if st.session_state.active_session_id == k:
+                    st.session_state.active_session_id = None
+    except Exception as e:
+        pass
+
+
+def fetch_session_history(session_id):
+    try:
+        response = requests.get(f"{API_URL}/sessions/{session_id}")
+        if response.status_code == 200:
+            data = response.json()
+            if session_id in st.session_state.chat_sessions:
+                st.session_state.chat_sessions[session_id]["history"] = data.get("history", [])
+                st.session_state.chat_sessions[session_id]["summary"] = data.get("conversation_summary")
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def delete_chat_session_api(session_id):
+    try:
+        response = requests.delete(f"{API_URL}/sessions/{session_id}")
+        if response.status_code == 200:
+            st.toast("Conversation deleted", icon="🗑️")
+            if st.session_state.active_session_id == session_id:
+                st.session_state.active_session_id = None
+            fetch_chat_sessions()
+            st.rerun()
+        else:
+            st.error("Failed to delete conversation.")
+    except Exception as e:
+        st.error(f"Error: {e}")
+
+
 def start_new_chat():
     st.session_state.active_session_id = None
-
-
-def select_chat(session_id):
-    st.session_state.active_session_id = session_id
 
 
 def truncate_text(text, max_chars=22):
@@ -178,11 +261,28 @@ def truncate_text(text, max_chars=22):
     return text
 
 
+def handle_query_params():
+    params = st.query_params
+
+    if "select_session" in params:
+        session_id = params["select_session"]
+        st.session_state.active_session_id = session_id
+
+        st.query_params.clear()
+        st.rerun()
+
+    if "delete_prompt" in params:
+        session_id = params["delete_prompt"]
+        st.session_state.pending_delete_id = session_id
+
+        st.query_params.clear()
+        st.rerun()
+
+
 @st.dialog("Confirm Deletion")
 def confirm_delete_dialog(filename):
     st.write(f"Are you sure you want to delete **{filename}**?")
     st.warning("This action cannot be undone. The file will be completely removed.")
-
     col1, col2 = st.columns([1, 1])
     with col1:
         if st.button("Cancel", use_container_width=True):
@@ -193,7 +293,34 @@ def confirm_delete_dialog(filename):
             st.rerun()
 
 
+@st.dialog("Delete Conversation")
+def confirm_delete_chat_dialog():
+    session_id = st.session_state.pending_delete_id
+    title = "this conversation"
+    if session_id in st.session_state.chat_sessions:
+        title = st.session_state.chat_sessions[session_id].get("title", "this conversation")
+
+    st.write(f"Are you sure you want to delete **{title}**?")
+    st.warning("This conversation history will be permanently lost.")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("Cancel", use_container_width=True, key="cancel_chat_del"):
+            st.session_state.pending_delete_id = None
+            st.rerun()
+    with col2:
+        if st.button("Yes, Delete", type="primary", use_container_width=True, key="confirm_chat_del"):
+            delete_chat_session_api(session_id)
+            st.session_state.pending_delete_id = None
+            st.rerun()
+
+
+handle_query_params()
 fetch_documents()
+fetch_chat_sessions()
+
+if st.session_state.pending_delete_id:
+    confirm_delete_chat_dialog()
 
 with st.sidebar:
     st.title("IKMS Assistant")
@@ -204,7 +331,6 @@ with st.sidebar:
     st.divider()
 
     st.subheader("Knowledge Base")
-
     with st.expander("Upload Documents", expanded=False):
         uploaded_file = st.file_uploader(
             "Upload PDF",
@@ -223,9 +349,7 @@ with st.sidebar:
                         if response.status_code == 200:
                             status.update(label="Indexed!", state="complete", expanded=False)
                             st.toast(f"Indexed {uploaded_file.name}", icon="✅")
-
                             st.session_state.uploader_key += 1
-
                             fetch_documents()
                             st.rerun()
                         else:
@@ -237,12 +361,11 @@ with st.sidebar:
 
     if st.session_state.documents:
         st.caption(f"{len(st.session_state.documents)} documents indexed")
-
         with st.expander("Manage Files", expanded=False):
             for doc in st.session_state.documents:
                 col1, col2 = st.columns([0.85, 0.15], gap="small", vertical_alignment="center")
                 with col1:
-                    short_name = truncate_text(doc, max_chars=20)
+                    short_name = truncate_text(doc, max_chars=25)
                     st.markdown(f"<span title='{doc}' style='font-size: 0.9em;'>{short_name}</span>",
                                 unsafe_allow_html=True)
                 with col2:
@@ -263,16 +386,26 @@ with st.sidebar:
 
     if not sorted_sessions:
         st.caption("No chat history.")
+    else:
+        html_content = ""
+        for session_id, session_data in sorted_sessions:
+            title = truncate_text(session_data.get("title", "New Chat"), max_chars=30)
+            is_active = (session_id == st.session_state.active_session_id)
+            active_class = "active" if is_active else ""
 
-    for session_id, session_data in sorted_sessions:
-        is_active = (session_id == st.session_state.active_session_id)
-        btn_type = "primary" if is_active else "secondary"
-        display_title = truncate_text(session_data.get("title", "New Chat"), max_chars=40)
+            row_html = f"""
+            <div class="session-card {active_class}">
+                <a href="?select_session={session_id}" target="_self" class="session-title" title="{session_data.get('title')}">
+                    {title}
+                </a>
+                <a href="?delete_prompt={session_id}" target="_self" class="session-delete" title="Delete conversation">
+                    &times;
+                </a>
+            </div>
+            """
+            html_content += row_html
 
-        if st.button(display_title, key=session_id, use_container_width=True, type=btn_type,
-                     help=session_data.get("title")):
-            select_chat(session_id)
-            st.rerun()
+        st.markdown(html_content, unsafe_allow_html=True)
 
 if not st.session_state.documents:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -299,9 +432,18 @@ if st.session_state.active_session_id is None:
     st.markdown("Ask questions about your uploaded documents.")
     current_history = []
 else:
-    session_data = st.session_state.chat_sessions[st.session_state.active_session_id]
-    st.header(session_data.get("title", "Chat"))
-    current_history = session_data.get("history", [])
+    active_id = st.session_state.active_session_id
+    if active_id in st.session_state.chat_sessions:
+        if not st.session_state.chat_sessions[active_id].get("history"):
+            with st.spinner("Loading conversation history..."):
+                fetch_session_history(active_id)
+
+        session_data = st.session_state.chat_sessions[active_id]
+        st.header(session_data.get("title", "Chat"))
+        current_history = session_data.get("history", [])
+    else:
+        st.session_state.active_session_id = None
+        st.rerun()
 
 for i, turn in enumerate(current_history):
     with st.chat_message("user"):
@@ -336,13 +478,15 @@ for i, turn in enumerate(current_history):
                         pass
 
 if st.session_state.active_session_id:
-    with st.popover("Chat Summary", use_container_width=False):
-        if session_data.get("summary"):
-            st.markdown("### Conversation Summary")
-            st.info(session_data["summary"])
-        else:
-            st.markdown("### No Summary Yet")
-            st.caption("A summary will be generated after 3 human messages.")
+    if st.session_state.active_session_id in st.session_state.chat_sessions:
+        sess = st.session_state.chat_sessions[st.session_state.active_session_id]
+        with st.popover("Chat Summary", use_container_width=False):
+            if sess.get("summary"):
+                st.markdown("### Conversation Summary")
+                st.info(sess["summary"])
+            else:
+                st.markdown("### No Summary Yet")
+                st.caption("A summary will be generated after 3 human messages.")
 
 if prompt := st.chat_input("Ask a question..."):
     with st.chat_message("user"):
